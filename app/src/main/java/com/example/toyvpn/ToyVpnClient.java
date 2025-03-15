@@ -30,7 +30,7 @@ import java.util.Collections;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-public class ToyVpnClient extends Activity {
+/*public class ToyVpnClient extends Activity {
     public interface Prefs {
         String NAME = "connection";
         String SERVER_ADDRESS = "server.address";
@@ -147,4 +147,4 @@ public class ToyVpnClient extends Activity {
     private Intent getServiceIntent() {
         return new Intent(this, ToyVpnService.class);
     }
-}
+}*/

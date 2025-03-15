@@ -37,10 +37,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 
-import android.net.ConnectivityManager;
-
-
-public class ToyVpnService extends VpnService implements Handler.Callback {
+/*public class ToyVpnService extends VpnService implements Handler.Callback {
     private static final String TAG = ToyVpnService.class.getSimpleName();
 
     public static final String ACTION_CONNECT = "com.example.android.toyvpn.START";
@@ -175,4 +172,4 @@ public class ToyVpnService extends VpnService implements Handler.Callback {
                 .setContentIntent(mConfigureIntent)
                 .build());
     }
-}
+}*/
