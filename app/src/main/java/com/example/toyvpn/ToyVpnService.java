@@ -31,17 +31,64 @@ import android.util.Pair;
 import android.widget.Toast;
 
 import java.io.IOException;
-import java.util.Collections;
-import java.util.Set;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.nio.channels.Selector;
+import java.nio.channels.spi.SelectorProvider;
+import java.util.Enumeration;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 
-/*public class ToyVpnService extends VpnService implements Handler.Callback {
+public class ToyVpnService extends VpnService implements Handler.Callback {
     private static final String TAG = ToyVpnService.class.getSimpleName();
+    private static final String VPN_ADDRESS = "10.0.0.2"; // Only IPv4 support for now
+    private static final String VPN_ROUTE = "0.0.0.0"; // Intercept everything
+    public static final String ACTION_CONNECT = "com.example.toyvpn.START";
+    public static final String ACTION_DISCONNECT = "com.example.toyvpn.STOP";
 
-    public static final String ACTION_CONNECT = "com.example.android.toyvpn.START";
-    public static final String ACTION_DISCONNECT = "com.example.android.toyvpn.STOP";
+    private ParcelFileDescriptor vpnFileDescriptor = null;
+    private PendingIntent pendingIntent;
+
+    private Selector selector; // = SelectorProvider.provider().openSelector();
+
+    public static String getLocalIpAddress() {
+        try {
+            for (Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces(); en.hasMoreElements();) {
+                NetworkInterface intf = en.nextElement();
+                for (Enumeration<InetAddress> enumIpAddr = intf.getInetAddresses(); enumIpAddr.hasMoreElements();) {
+                    InetAddress inetAddress = enumIpAddr.nextElement();
+                    if (!inetAddress.isLoopbackAddress()) {
+                        return inetAddress.getHostAddress();
+                    }
+                }
+            }
+        } catch (SocketException ex) {
+            Log.e("SocketException", ex.toString());
+        }
+        return null;
+    }
+
+    private void setupVPN() {
+        try {
+            if (vpnFileDescriptor == null) {
+                Builder builder = new Builder();
+                builder.addAddress(Objects.requireNonNull(getLocalIpAddress()), 32); // VPN_ADDRESS
+                builder.addRoute(VPN_ROUTE, 0);
+                //builder.addDnsServer(Config.dns);
+                //if (Config.testLocal) {builder.addAllowedApplication("com.mocyx.basic_client");}
+                vpnFileDescriptor = builder
+                        .setSession(getString(R.string.app_name))
+                        .setConfigureIntent(pendingIntent)
+                        .establish();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "error", e);
+            System.exit(0);
+        }
+    }
 
     private Handler mHandler;
 
@@ -103,18 +150,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
         // Extract information from the shared preferences.
         final SharedPreferences prefs = getSharedPreferences(ToyVpnClient.Prefs.NAME, MODE_PRIVATE);
-        final String server = prefs.getString(ToyVpnClient.Prefs.SERVER_ADDRESS, "");
-        final byte[] secret = prefs.getString(ToyVpnClient.Prefs.SHARED_SECRET, "").getBytes();
-        final boolean allow = prefs.getBoolean(ToyVpnClient.Prefs.ALLOW, true);
-        final Set<String> packages =
-                prefs.getStringSet(ToyVpnClient.Prefs.PACKAGES, Collections.emptySet());
-        final int port = prefs.getInt(ToyVpnClient.Prefs.SERVER_PORT, 0);
-        final String proxyHost = prefs.getString(ToyVpnClient.Prefs.PROXY_HOSTNAME, "");
-        final int proxyPort = prefs.getInt(ToyVpnClient.Prefs.PROXY_PORT, 0);
-        startConnection(new ToyVpnConnection(
-                this, mNextConnectionId.getAndIncrement(), server, port, secret,
-                proxyHost, proxyPort, allow, packages));
-
+        startConnection(new ToyVpnConnection(this, mNextConnectionId.getAndIncrement()));
     }
 
     private void startConnection(final ToyVpnConnection connection) {
@@ -172,4 +208,4 @@ import java.util.concurrent.atomic.AtomicReference;
                 .setContentIntent(mConfigureIntent)
                 .build());
     }
-}*/
+}

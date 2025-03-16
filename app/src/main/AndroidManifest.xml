@@ -21,12 +21,22 @@
         android:theme="@style/Theme.ToyVpnTest"
         tools:targetApi="31">
 
-        <service
-            android:name=".PassthroughVpnService"
-            android:exported="true"
-            android:permission="android.permission.BIND_VPN_SERVICE">
+        <activity android:name=".ToyVpnClient"
+            android:configChanges="orientation|keyboardHidden"
+            android:exported="true">
             <intent-filter>
-                <action android:name="android.net.VpnService" />
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <service android:name=".ToyVpnService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="vpn" />
+            <intent-filter>
+                <action android:name="android.net.VpnService"/>
             </intent-filter>
         </service>
 

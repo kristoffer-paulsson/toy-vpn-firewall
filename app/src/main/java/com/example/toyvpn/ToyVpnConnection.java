@@ -16,55 +16,64 @@
 
 package com.example.toyvpn;
 
-import static android.provider.Settings.System.getString;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 
 import android.app.PendingIntent;
-import android.content.pm.PackageManager;
-import android.net.ProxyInfo;
 import android.net.VpnService;
 import android.os.ParcelFileDescriptor;
-import android.text.TextUtils;
 import android.util.Log;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.NetworkInterface;
 import java.net.SocketAddress;
 import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
-import java.util.Enumeration;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-/*public class ToyVpnConnection implements Runnable {
-
+public class ToyVpnConnection implements Runnable {
+    /**
+     * Callback interface to let the {@link ToyVpnService} know about new connections
+     * and update the foreground notification with connection status.
+     */
     public interface OnEstablishListener {
         void onEstablish(ParcelFileDescriptor tunInterface);
     }
 
+    /** Maximum packet size is constrained by the MTU, which is given as a signed short. */
     private static final int MAX_PACKET_SIZE = Short.MAX_VALUE;
 
+    /** Time to wait in between losing the connection and retrying. */
     private static final long RECONNECT_WAIT_MS = TimeUnit.SECONDS.toMillis(3);
 
+    /** Time between keepalives if there is no traffic at the moment.
+     *
+     * TODO: don't do this; it's much better to let the connection die and then reconnect when
+     *       necessary instead of keeping the network hardware up for hours on end in between.
+     **/
     private static final long KEEPALIVE_INTERVAL_MS = TimeUnit.SECONDS.toMillis(15);
 
+    /** Time to wait without receiving any response before assuming the server is gone. */
     private static final long RECEIVE_TIMEOUT_MS = TimeUnit.SECONDS.toMillis(20);
 
+    /**
+     * Time between polling the VPN interface for new traffic, since it's non-blocking.
+     *
+     * TODO: really don't do this; a blocking read on another thread is much cleaner.
+     */
     private static final long IDLE_INTERVAL_MS = TimeUnit.MILLISECONDS.toMillis(100);
 
+    /**
+     * Number of periods of length {@IDLE_INTERVAL_MS} to wait before declaring the handshake a
+     * complete and abject failure.
+     *
+     * TODO: use a higher-level protocol; hand-rolling is a fun but pointless exercise.
+     */
     private static final int MAX_HANDSHAKE_ATTEMPTS = 50;
 
     private final VpnService mService;
     private final int mConnectionId;
-
-    private final String mServerName;
-    private final int mServerPort;
-    private final byte[] mSharedSecret;
 
     private PendingIntent mConfigureIntent;
     private OnEstablishListener mOnEstablishListener;
@@ -73,32 +82,16 @@ import java.util.concurrent.TimeUnit;
     private String mProxyHostName;
     private int mProxyHostPort;
 
-    // Allowed/Disallowed packages for VPN usage
-    private final boolean mAllow;
-    private final Set<String> mPackages;
-
-    public ToyVpnConnection(final VpnService service, final int connectionId,
-            final String serverName, final int serverPort, final byte[] sharedSecret,
-            final String proxyHostName, final int proxyHostPort, boolean allow,
-            final Set<String> packages) {
+    public ToyVpnConnection(
+            final VpnService service, final int connectionId
+    ) {
         mService = service;
         mConnectionId = connectionId;
-
-        mServerName = serverName;
-        mServerPort= serverPort;
-        mSharedSecret = sharedSecret;
-
-        if (!TextUtils.isEmpty(proxyHostName)) {
-            mProxyHostName = proxyHostName;
-        }
-        if (proxyHostPort > 0) {
-            // The port value is always an integer due to the configured inputType.
-            mProxyHostPort = proxyHostPort;
-        }
-        mAllow = allow;
-        mPackages = packages;
     }
 
+    /**
+     * Optionally, set an intent to configure the VPN. This is {@code null} by default.
+     */
     public void setConfigureIntent(PendingIntent intent) {
         mConfigureIntent = intent;
     }
@@ -116,7 +109,6 @@ import java.util.concurrent.TimeUnit;
             // This greatly reduces the complexity of seamless handover, which
             // tries to recreate the tunnel without shutting down everything.
             // In this demo, all we need to know is the server address.
-            final SocketAddress serverAddress = new InetSocketAddress(mServerName, mServerPort);
 
             // We try to create the tunnel several times.
             // TODO: The better way is to work with ConnectivityManager, trying only when the
@@ -124,15 +116,12 @@ import java.util.concurrent.TimeUnit;
             // Here we just use a counter to keep things simple.
             for (int attempt = 0; attempt < 10; ++attempt) {
                 // Reset the counter if we were connected.
-                if (run(serverAddress)) {
-                    attempt = 0;
-                }
 
                 // Sleep for a while. This also checks if we got interrupted.
                 Thread.sleep(3000);
             }
             Log.i(getTag(), "Giving up");
-        } catch (IOException | InterruptedException | IllegalArgumentException e) {
+        } catch (InterruptedException | IllegalArgumentException e) {
             Log.e(getTag(), "Connection failed, exiting", e);
         }
     }
@@ -258,8 +247,6 @@ import java.util.concurrent.TimeUnit;
         // purposes.
         ByteBuffer packet = ByteBuffer.allocate(1024);
 
-        // Control messages always start with zero.
-        packet.put((byte) 0).put(mSharedSecret).flip();
 
         // Send the secret several times in case of packet loss.
         for (int i = 0; i < 3; ++i) {
@@ -305,42 +292,13 @@ import java.util.concurrent.TimeUnit;
                         builder.addSearchDomain(fields[1]);
                         break;
                 }
-
             } catch (NumberFormatException e) {
                 throw new IllegalArgumentException("Bad parameter: " + parameter);
             }
         }
 
-        try {
-            builder.addAddress(getLocalIpAddress(), 24)
-                    .addRoute("0.0.0.0", 0);
-                    //.addRoute("128.0.0.0", 1);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("Bad parameter: ");
-        }
-
         // Create a new interface using the builder and save the parameters.
         final ParcelFileDescriptor vpnInterface;
-        for (String packageName : mPackages) {
-            try {
-                if (mAllow) {
-                    builder.addAllowedApplication(packageName);
-                } else {
-                    builder.addDisallowedApplication(packageName);
-                }
-            } catch (PackageManager.NameNotFoundException e){
-                Log.w(getTag(), "Package not available: " + packageName, e);
-            }
-        }
-        try {
-            builder.addDisallowedApplication("");
-        } catch (PackageManager.NameNotFoundException e){
-            Log.w(getTag(), "Package not available: ");
-        }
-        builder.setSession(mServerName).setConfigureIntent(mConfigureIntent);
-        if (!TextUtils.isEmpty(mProxyHostName)) {
-            builder.setHttpProxy(ProxyInfo.buildDirectProxy(mProxyHostName, mProxyHostPort));
-        }
         synchronized (mService) {
             vpnInterface = builder.establish();
             if (mOnEstablishListener != null) {
@@ -354,21 +312,4 @@ import java.util.concurrent.TimeUnit;
     private final String getTag() {
         return ToyVpnConnection.class.getSimpleName() + "[" + mConnectionId + "]";
     }
-
-    public String getLocalIpAddress() {
-        try {
-            for (Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces(); en.hasMoreElements();) {
-                NetworkInterface intf = en.nextElement();
-                for (Enumeration<InetAddress> enumIpAddr = intf.getInetAddresses(); enumIpAddr.hasMoreElements();) {
-                    InetAddress inetAddress = enumIpAddr.nextElement();
-                    if (!inetAddress.isLoopbackAddress()) {
-                        return inetAddress.getHostAddress().toString();
-                    }
-                }
-            }
-        } catch (SocketException ex) {
-            Log.e("SocketException", ex.toString());
-        }
-        return null;
-    }
-}*/
+}

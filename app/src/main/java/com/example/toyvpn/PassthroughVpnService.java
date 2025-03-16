@@ -1,11 +1,15 @@
 package com.example.toyvpn;
 
-import android.app.PendingIntent;
+/*import android.app.PendingIntent;
 import android.content.Intent;
 import android.net.VpnService;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
+import com.example.toyvpn.tcpip.Packet;
+
+import java.io.FileDescriptor;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
@@ -18,8 +22,6 @@ public class PassthroughVpnService extends VpnService {
     private static final String TAG = PassthroughVpnService.class.getSimpleName();
     private static final String VPN_ADDRESS = "10.0.0.2"; // Only IPv4 support for now
     private static final String VPN_ROUTE = "0.0.0.0"; // Intercept everything
-
-    //private static final String[] DNS = {"8.8.8.8", "8.8.4.4"};
 
 
     private ParcelFileDescriptor vpnInterface = null;
@@ -41,10 +43,6 @@ public class PassthroughVpnService extends VpnService {
                 Builder builder = new Builder();
                 builder.addAddress(VPN_ADDRESS, 32);
                 builder.addRoute(VPN_ROUTE, 0);
-                //builder.addDnsServer(Config.dns);
-                /*if (Config.testLocal) {
-                    builder.addAllowedApplication("com.example.toyvpn");
-                }*/
                 vpnInterface = builder
                         .setSession(getString(R.string.app_name))
                         .setConfigureIntent(pendingIntent)
@@ -84,4 +82,104 @@ public class PassthroughVpnService extends VpnService {
         }
         return null;
     }
-}
+
+    private static class VPNRunnable implements Runnable {
+        private static final String TAG = VPNRunnable.class.getSimpleName();
+
+        private FileDescriptor vpnFileDescriptor;
+
+        private BlockingQueue<Packet> deviceToNetworkUDPQueue;
+        private BlockingQueue<Packet> deviceToNetworkTCPQueue;
+        private BlockingQueue<ByteBuffer> networkToDeviceQueue;
+
+        public VPNRunnable(FileDescriptor vpnFileDescriptor,
+                           BlockingQueue<Packet> deviceToNetworkUDPQueue,
+                           BlockingQueue<Packet> deviceToNetworkTCPQueue,
+                           BlockingQueue<ByteBuffer> networkToDeviceQueue) {
+            this.vpnFileDescriptor = vpnFileDescriptor;
+            this.deviceToNetworkUDPQueue = deviceToNetworkUDPQueue;
+            this.deviceToNetworkTCPQueue = deviceToNetworkTCPQueue;
+            this.networkToDeviceQueue = networkToDeviceQueue;
+        }
+
+
+        static class WriteVpnThread implements Runnable {
+            FileChannel vpnOutput;
+            private BlockingQueue<ByteBuffer> networkToDeviceQueue;
+
+            WriteVpnThread(FileChannel vpnOutput, BlockingQueue<ByteBuffer> networkToDeviceQueue) {
+                this.vpnOutput = vpnOutput;
+                this.networkToDeviceQueue = networkToDeviceQueue;
+            }
+
+            @Override
+            public void run() {
+                while (true) {
+                    try {
+                        ByteBuffer bufferFromNetwork = networkToDeviceQueue.take();
+                        bufferFromNetwork.flip();
+                        while (bufferFromNetwork.hasRemaining()) {
+                            int w = vpnOutput.write(bufferFromNetwork);
+                            if (w > 0) {
+                                MainActivity.downByte.addAndGet(w);
+                            }
+                            if (Config.logRW) {
+                                Log.d(TAG, "vpn write " + w);
+                            }
+                        }
+                    } catch (Exception e) {
+                        Log.i(TAG, "WriteVpnThread fail", e);
+                    }
+                }
+
+            }
+        }
+
+        @Override
+        public void run() {
+            Log.i(TAG, "Started");
+            FileChannel vpnInput = new FileInputStream(vpnFileDescriptor).getChannel();
+            FileChannel vpnOutput = new FileOutputStream(vpnFileDescriptor).getChannel();
+            Thread t = new Thread(new WriteVpnThread(vpnOutput, networkToDeviceQueue));
+            t.start();
+            try {
+                ByteBuffer bufferToNetwork = null;
+                while (!Thread.interrupted()) {
+                    bufferToNetwork = ByteBufferPool.acquire();
+                    int readBytes = vpnInput.read(bufferToNetwork);
+
+                    MainActivity.upByte.addAndGet(readBytes);
+
+                    if (readBytes > 0) {
+                        bufferToNetwork.flip();
+
+                        Packet packet = new Packet(bufferToNetwork);
+                        if (packet.isUDP()) {
+                            if (Config.logRW) {
+                                Log.i(TAG, "read udp" + readBytes);
+                            }
+                            deviceToNetworkUDPQueue.offer(packet);
+                        } else if (packet.isTCP()) {
+                            if (Config.logRW) {
+                                Log.i(TAG, "read tcp " + readBytes);
+                            }
+                            deviceToNetworkTCPQueue.offer(packet);
+                        } else {
+                            Log.w(TAG, String.format("Unknown packet protocol type %d", packet.ip4Header.protocolNum));
+                        }
+                    } else {
+                        try {
+                            Thread.sleep(10);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                Log.w(TAG, e.toString(), e);
+            } finally {
+                closeResources(vpnInput, vpnOutput);
+            }
+        }
+    }
+}*/

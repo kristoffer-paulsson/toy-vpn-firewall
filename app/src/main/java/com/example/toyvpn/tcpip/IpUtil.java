@@ -34,7 +34,7 @@ public class IpUtil {
         udpHeader.destinationPort = dest.getPort();
         udpHeader.length = 0;
 
-        ByteBuffer byteBuffer = ByteBufferPool.acquire();
+        ByteBuffer byteBuffer = ByteBuffer.allocate(16384);
         byteBuffer.flip();
 
         packet.ip4Header = ip4Header;
@@ -80,7 +80,7 @@ public class IpUtil {
         tcpHeader.urgentPointer = 0;
         tcpHeader.window = 65535;
 
-        ByteBuffer byteBuffer = ByteBufferPool.acquire();
+        ByteBuffer byteBuffer = ByteBuffer.allocate(16384);
         byteBuffer.flip();
 
         packet.ip4Header = ip4Header;

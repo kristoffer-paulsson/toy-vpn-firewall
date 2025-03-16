@@ -17,22 +17,13 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
+    <LinearLayout android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="3mm">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="3mm">
-
-        <Button
-            android:id="@+id/connect"
-            style="@style/item"
-            android:text="@string/connect" />
-
-        <Button
-            android:id="@+id/disconnect"
-            style="@style/item"
-            android:text="@string/disconnect" />
+        <Button style="@style/item" android:id="@+id/connect" android:text="@string/connect"/>
+        <Button style="@style/item" android:id="@+id/disconnect" android:text="@string/disconnect"/>
 
     </LinearLayout>
 </ScrollView>
