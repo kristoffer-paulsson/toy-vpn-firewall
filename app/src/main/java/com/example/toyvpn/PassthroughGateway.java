@@ -9,32 +9,36 @@ import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
-import java.nio.channels.spi.SelectorProvider;
-import java.util.Iterator;
+import java.util.Enumeration;
 import java.util.Objects;
-import java.util.Set;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+
+import kotlin.Triple;
 
 public class PassthroughGateway implements Gateway {
 
-    private final ConcurrentHashMap<String, ConnectionHandler> conn = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Connection> connections = new ConcurrentHashMap<>();
+
+    private ConnectionManager connectionManager;
 
     private final VpnService vpnService;
 
     private final ParcelFileDescriptor vpnFileDescriptor;
 
-    private FileChannel vpnInput = null;
+    private FileChannel vpnInput;
 
-    private FileChannel vpnOutput = null;
+    private FileChannel vpnOutput;
 
-    private Selector selector = null;
+    private final BlockingQueue<Triple<ByteBuffer, String, CONN_OP>> remoteInput = new LinkedBlockingQueue<>();
+
+    private final BlockingQueue<Triple<Packet, String, CONN_OP>> remoteOutput = new LinkedBlockingQueue<>();
 
     private ExecutorService executorService;
 
@@ -56,53 +60,43 @@ public class PassthroughGateway implements Gateway {
         }
     }
 
-    /*public void cancel() {
-        try {
-            destSocket.close();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        } finally {
-            selectionKey.cancel();
-        }
-    }*/
-
     @Override
     public void startup() {
         FileDescriptor descriptor = vpnFileDescriptor.getFileDescriptor();
         vpnInput = new FileInputStream(descriptor).getChannel();
         vpnOutput = new FileOutputStream(descriptor).getChannel();
 
-        try {
-            this.selector = SelectorProvider.provider().openSelector();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        connectionManager = new ConnectionManager();
 
         executorService = Executors.newFixedThreadPool(2);
-        executorService.execute(new DownStreamWorker(this));
-        executorService.execute(new UpStreamWorker(this));
+        executorService.execute(new LocalWorker(this));
+        executorService.execute(new ConnectionManager.RemoteWorker(vpnService, remoteInput, remoteOutput));
     }
 
     @Override
     public void shutdown() {
+        Enumeration<String> tags = connections.keys();
+        while (tags.hasMoreElements()) {
+            closeHandler(tags.nextElement());
+        }
+
         try {
             vpnFileDescriptor.close();
 
             vpnInput.close();
             vpnOutput.close();
-            selector.close();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
         executorService.shutdown();
     }
 
-    public VpnService getVpnService() {
-        return vpnService;
+    public void closeHandler(String tag) {
+        remoteOutput.offer(new Triple<>(new Packet(), tag, CONN_OP.CLOSE));
     }
 
-    public Selector getSelector() {
-        return selector;
+    public VpnService getVpnService() {
+        return vpnService;
     }
 
     public FileChannel getVpnInput() {
@@ -113,90 +107,78 @@ public class PassthroughGateway implements Gateway {
         return vpnOutput;
     }
 
-    public static String getIpAndPort(Packet packet) {
-        InetAddress destinationAddress = packet.ip4Header.destinationAddress;
-        Packet.TCPHeader tcpHeader = packet.tcpHeader;
-        //Log.d(TAG, String.format("get pack %d tcp " + tcpHeader.printSimple() + " ", currentPacket.packId));
-        int destinationPort = tcpHeader.destinationPort;
-        int sourcePort = tcpHeader.sourcePort;
-        return destinationAddress.getHostAddress() + ":" + destinationPort + ":" + sourcePort;
-    }
-
-    static class UpStreamWorker implements Runnable {
+    static class LocalWorker implements Runnable {
 
         private final PassthroughGateway gateway;
 
-        UpStreamWorker(PassthroughGateway gateway) {
+        LocalWorker(PassthroughGateway gateway) {
             this.gateway = gateway;
         }
 
         @Override
         public void run() {
-            FileChannel vpnInput = gateway.vpnInput;
-            ConcurrentHashMap<String, ConnectionHandler> conn = gateway.conn;
-
-            ByteBuffer bufferToNetwork = ByteBuffer.allocateDirect(16384);
-
+            ByteBuffer output = ByteBuffer.allocateDirect(1 << 14);
             while (!Thread.interrupted()) {
-                bufferToNetwork.clear();
                 try {
-                    int readBytes = vpnInput.read(bufferToNetwork);
-                    if(readBytes > 0) {
-                        bufferToNetwork.flip();
-                        Packet packet = new Packet(bufferToNetwork);
-
-                        if(!packet.isTCP())
-                            continue;
-
-                        String ipAndPort = getIpAndPort(packet);
-                        synchronized (conn) {
-                            if(!conn.containsKey(ipAndPort)) {
-                                ConnectionHandler connectionHandler = new ConnectionHandler(gateway, packet, ipAndPort);
-                                connectionHandler.connectRemote();
-                                conn.put(ipAndPort, connectionHandler);
+                    boolean again = false;
+                    if(!gateway.remoteInput.isEmpty()) {
+                        Triple<ByteBuffer, String, CONN_OP> triple = gateway.remoteInput.take();
+                        String tag = triple.getSecond();
+                        if(gateway.connections.containsKey(tag)){
+                            Connection conn = Objects.requireNonNull(
+                                    gateway.connections.get(tag)
+                            );
+                            ByteBuffer throughPut = triple.getFirst();
+                            throughPut.flip();
+                            int writtenBytes = 0;
+                            while (throughPut.hasRemaining()) {
+                                writtenBytes += gateway.vpnOutput.write(throughPut);
                             }
-                            gateway.sendPacket(Objects.requireNonNull(conn.get(ipAndPort)), packet);
+                            conn.incomingBytes += writtenBytes;
+                            if(writtenBytes > 0) conn.incomingCount++;
+                            if(triple.getThird() == CONN_OP.CLOSE) {
+                                gateway.connections.remove(triple.getSecond());
+                            }
+                        } else {
+                            // TODO "Security event, connection non-existent"
                         }
-                    } else {
-                        try {
-                            Thread.sleep(10);
-                        } catch (InterruptedException e) {
-                            throw new RuntimeException(e);
-                        }
+                        again = true;
                     }
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        }
-    }
 
-    static class DownStreamWorker implements Runnable {
+                    output.clear();
+                    int readBytes = 0;
+                    if ((readBytes = gateway.vpnInput.read(output)) > 0) {
+                        output.flip();
+                        Packet packet = new Packet(output.duplicate());
 
-        private final PassthroughGateway gateway;
-
-        DownStreamWorker(PassthroughGateway gateway) {
-            this.gateway = gateway;
-        }
-
-        @Override
-        public void run() {
-            Selector selector = gateway.selector;
-            while (!Thread.interrupted()) {
-                try {
-                    int n = selector.select();
-
-                    Set<SelectionKey> selectedKeys = selector.selectedKeys();
-                    Iterator<SelectionKey> keyIterator = selectedKeys.iterator();
-
-                    while (keyIterator.hasNext()) {
-                        SelectionKey key = keyIterator.next();
-                        if(key.isReadable()) {
-                            gateway.receivePacket((ConnectionHandler) key.attachment());
+                        if(packet.isTCP()) {
+                            String tag = Connection.packetToTag(packet);
+                            Connection conn;
+                            CONN_OP type;
+                            if(gateway.connections.containsKey(tag)){
+                                conn = Objects.requireNonNull(gateway.connections.get(tag));
+                                type = CONN_OP.SEND;
+                            } else {
+                                conn = new Connection();
+                                conn.tag = tag;
+                                conn.remote = packet.ip4Header.destinationAddress;
+                                conn.local = packet.ip4Header.sourceAddress;
+                                gateway.connections.put(tag, conn);
+                                type = CONN_OP.OPEN;
+                            }
+                            conn.outgoingBytes += readBytes;
+                            conn.outgoingCount++;
+                            gateway.remoteOutput.offer(new Triple<>(packet, tag, type));
+                        } else {
+                            // TODO "Non-TCP packages currently silently dropped"
                         }
-                        keyIterator.remove();
+                        again = true;
                     }
-                } catch (IOException e) {
+
+                    if(!again) {
+                        Thread.sleep(50);
+                    }
+                } catch (InterruptedException | IOException e) {
                     throw new RuntimeException(e);
                 }
             }

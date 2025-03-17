@@ -13,7 +13,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
-import java.nio.channels.spi.SelectorProvider;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -32,28 +31,34 @@ public class ConnectionHandler {
     public InetSocketAddress sourceAddress;
     public InetSocketAddress destinationAddress;
     public SocketChannel destSocket;
+
+    public ByteBuffer remoteOutBuffer = ByteBuffer.allocate(8 * 1024);
+
     private final PassthroughGateway gateway;
     private Selector selector;
     BlockingQueue<ByteBuffer> networkToDeviceQueue;
 
     public int packId = 1;
 
+    public long timestamp=0L;
+
+    public int synCount = 0;
+
     public boolean upActive = true;
     public boolean downActive = true;
-    public String connName;
+    public String tag;
 
     public SelectionKey selectionKey;
 
-    ConnectionHandler(PassthroughGateway gateway, Packet packet, String ipAndPort) {
+    ConnectionHandler(PassthroughGateway gateway) {
         this.gateway = gateway;
-        this.sourceAddress = new InetSocketAddress(
-                packet.ip4Header.sourceAddress, packet.tcpHeader.sourcePort);
-        this.destinationAddress = new InetSocketAddress(
-                packet.ip4Header.destinationAddress, packet.tcpHeader.destinationPort);
-        connName = ipAndPort;
     }
 
-    public void connectRemote() {
+    void cleanup() {
+        gateway.closeHandler(tag);
+    }
+
+    /*public void connectRemote() {
         try {
             //connect
             destSocket = SelectorProvider.provider().openSocketChannel();//SocketChannel.open();
@@ -71,5 +76,5 @@ public class ConnectionHandler {
         } catch (IOException e) {
             Log.e(TAG, e.getMessage(), e);
         }
-    }
+    }*/
 }
