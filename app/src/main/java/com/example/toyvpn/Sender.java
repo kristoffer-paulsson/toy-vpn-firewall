@@ -10,15 +10,21 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
-import java.util.Collections;
-import java.util.concurrent.ConcurrentHashMap;
+
+import kotlin.Triple;
 
 
 public class Sender {
 
+    private final ConnectionManager connectionManager;
+
+    Sender(ConnectionManager connectionManager) {
+        this.connectionManager = connectionManager;
+    }
+
     public static final int HEADER_SIZE = Packet.IP4_HEADER_SIZE + Packet.TCP_HEADER_SIZE;
 
-    public static String packetToTag(Packet packet) {
+    public String packetToTag(Packet packet) {
         InetAddress destinationAddress = packet.ip4Header.destinationAddress;
         Packet.TCPHeader tcpHeader = packet.tcpHeader;
         //Log.d(TAG, String.format("get pack %d tcp " + tcpHeader.printSimple() + " ", currentPacket.packId));
@@ -27,15 +33,13 @@ public class Sender {
         return destinationAddress.getHostAddress() + ":" + destinationPort + ":" + sourcePort;
     }
 
-    public static ConnectionHandler start(
-            ConcurrentHashMap<String, ConnectionHandler> connections,
+    public ConnectionHandler start(
             Packet packet,
-            PassthroughGateway gateway,
             String tag
     ) throws IOException {
         ConnectionHandler handler;
-        if (!connections.containsKey(tag)) {
-            handler = new ConnectionHandler(gateway);
+        //if (!connections.containsKey(tag)) {
+            handler = new ConnectionHandler(connectionManager);
             handler.sourceAddress = new InetSocketAddress(
                     packet.ip4Header.sourceAddress,
                     packet.tcpHeader.sourcePort
@@ -49,29 +53,29 @@ public class Sender {
             //objAttrUtil.setAttr(pipe.remote, "pipe", pipe);
             handler.destSocket.configureBlocking(false);
             handler.selectionKey = handler.destSocket.register(
-                    gateway.getSelector(),
+                    connectionManager.getSelector(),
                     SelectionKey.OP_CONNECT,
                     handler
             );
             //objAttrUtil.setAttr(pipe.remote, "key", key);
             //very important, protect
-            gateway.getVpnService().protect(handler.destSocket.socket());
+            connectionManager.getVpnService().protect(handler.destSocket.socket());
             boolean b1 = handler.destSocket.connect(handler.destinationAddress);
             handler.timestamp = System.currentTimeMillis();
             //Log.i(TAG, String.format("initPipe %s %s", pipe.destinationAddress, b1));
             handler.tag = tag;
-            synchronized (Collections.unmodifiableMap(connections)) {
+        /*    synchronized (Collections.unmodifiableMap(connections)) {
                 connections.put(tag, handler);
             }
         } else {
             synchronized (Collections.unmodifiableMap(connections)) {
                 handler = connections.get(tag);
             }
-        }
+        }*/
         return handler;
     }
 
-    public static void sendPacket(ConnectionHandler handler, Packet packet) {
+    public void sendPacket(ConnectionHandler handler, Packet packet) {
         boolean end = false;
         Packet.TCPHeader tcpHeader = packet.tcpHeader;
         if (tcpHeader.isSYN()) {
@@ -91,7 +95,7 @@ public class Sender {
         }
     }
 
-    private static void handleSyn(Packet packet, ConnectionHandler handler) {
+    private void handleSyn(Packet packet, ConnectionHandler handler) {
         if (handler.tcbStatus == TCBStatus.SYN_SENT) {
             handler.tcbStatus = TCBStatus.SYN_RECEIVED;
             //Log.i(TAG, String.format("handleSyn %s %s", pipe.destinationAddress, pipe.tcbStatus));
@@ -110,7 +114,7 @@ public class Sender {
         handler.synCount += 1;
     }
 
-    private static void handleRst(Packet packet, ConnectionHandler handler) {
+    private void handleRst(Packet packet, ConnectionHandler handler) {
         //Log.i(TAG, String.format("handleRst %d", pipe.tunnelId));
         handler.upActive = false;
         handler.downActive = false;
@@ -118,7 +122,7 @@ public class Sender {
         handler.tcbStatus = TCBStatus.CLOSE_WAIT;
     }
 
-    private static void handleFin(Packet packet, ConnectionHandler handler) {
+    private void handleFin(Packet packet, ConnectionHandler handler) {
         //Log.i(TAG, String.format("handleFin %d", handler.tunnelId));
         handler.myAcknowledgementNum = packet.tcpHeader.sequenceNumber + 1;
         handler.theirAcknowledgementNum = packet.tcpHeader.acknowledgementNumber;
@@ -130,7 +134,7 @@ public class Sender {
         //Log.i(TAG, String.format("handleFin %s %s", handler.destinationAddress, handler.tcbStatus));
     }
 
-    private static void handleAck(Packet packet, ConnectionHandler handler) {
+    private void handleAck(Packet packet, ConnectionHandler handler) {
         if (handler.tcbStatus == TCBStatus.SYN_RECEIVED) {
             handler.tcbStatus = TCBStatus.ESTABLISHED;
 
@@ -168,7 +172,7 @@ public class Sender {
         System.currentTimeMillis();
     }
 
-    private static void sendTcpPack(ConnectionHandler handler, byte flag, byte[] data) {
+    private void sendTcpPack(ConnectionHandler handler, byte flag, byte[] data) {
         int dataLen = 0;
         if (data != null) {
             dataLen = data.length;
@@ -188,12 +192,9 @@ public class Sender {
         //
         packet.updateTCPBuffer(byteBuffer, flag, handler.mySequenceNum, handler.myAcknowledgementNum, dataLen);
         byteBuffer.position(HEADER_SIZE + dataLen);
-        /*
-          Implement some type of loopback
-         */
-        //
-        //networkToDeviceQueue.offer(byteBuffer);
-        //
+
+        connectionManager.getRemoteInput().offer(new Triple<>(byteBuffer, handler.tag, Gateway.CONN_OP.SEND));
+
         if ((flag & (byte) Packet.TCPHeader.SYN) != 0) {
             handler.mySequenceNum += 1;
         }
@@ -205,7 +206,7 @@ public class Sender {
         }
     }
 
-    private static boolean tryFlushWrite(ConnectionHandler handler) {
+    private boolean tryFlushWrite(ConnectionHandler handler) {
         try {
             ByteBuffer buffer = handler.remoteOutBuffer;
             if (handler.destSocket.socket().isOutputShutdown() && buffer.remaining() != 0) {

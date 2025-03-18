@@ -11,7 +11,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.channels.Selector;
 import java.util.Enumeration;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
@@ -66,11 +65,12 @@ public class PassthroughGateway implements Gateway {
         vpnInput = new FileInputStream(descriptor).getChannel();
         vpnOutput = new FileOutputStream(descriptor).getChannel();
 
-        connectionManager = new ConnectionManager();
+        connectionManager = new ConnectionManager(vpnService, remoteInput, remoteOutput);
 
-        executorService = Executors.newFixedThreadPool(2);
+        executorService = Executors.newFixedThreadPool(3);
         executorService.execute(new LocalWorker(this));
-        executorService.execute(new ConnectionManager.RemoteWorker(vpnService, remoteInput, remoteOutput));
+        executorService.execute(connectionManager.getSocketWorker());
+        executorService.execute(connectionManager.getConnectionWorker());
     }
 
     @Override

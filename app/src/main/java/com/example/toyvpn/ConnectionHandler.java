@@ -1,13 +1,8 @@
 package com.example.toyvpn;
 
-import static android.content.ContentValues.TAG;
-
-import android.util.Log;
-
 import com.example.toyvpn.tcpip.Packet;
 import com.example.toyvpn.tcpip.TCBStatus;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
@@ -15,6 +10,7 @@ import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class ConnectionHandler {
@@ -34,7 +30,7 @@ public class ConnectionHandler {
 
     public ByteBuffer remoteOutBuffer = ByteBuffer.allocate(8 * 1024);
 
-    private final PassthroughGateway gateway;
+    private final ConnectionManager manager;
     private Selector selector;
     BlockingQueue<ByteBuffer> networkToDeviceQueue;
 
@@ -50,12 +46,15 @@ public class ConnectionHandler {
 
     public SelectionKey selectionKey;
 
-    ConnectionHandler(PassthroughGateway gateway) {
-        this.gateway = gateway;
+    ConnectionHandler(ConnectionManager manager) {
+        this.manager = manager;
     }
 
     void cleanup() {
-        gateway.closeHandler(tag);
+        ConcurrentHashMap<String, ConnectionHandler> connections = manager.getConnections();
+        synchronized (connections) {
+            connections.remove(tag);
+        }
     }
 
     /*public void connectRemote() {
