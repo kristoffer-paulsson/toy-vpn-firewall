@@ -14,12 +14,10 @@ import java.nio.channels.SocketChannel;
 import kotlin.Triple;
 
 
-public class Sender {
-
-    private final ConnectionManager connectionManager;
+public class Sender extends TcpHandler {
 
     Sender(ConnectionManager connectionManager) {
-        this.connectionManager = connectionManager;
+        super(connectionManager);
     }
 
     public static final int HEADER_SIZE = Packet.IP4_HEADER_SIZE + Packet.TCP_HEADER_SIZE;
@@ -268,21 +266,6 @@ public class Sender {
 
         if (isClosedTunnel(handler)) {
             cleanPipe(handler);
-        }
-    }
-
-    private static boolean isClosedTunnel(ConnectionHandler handler) {
-        return !handler.upActive && !handler.downActive;
-    }
-
-    private static void cleanPipe(ConnectionHandler handler) {
-        try {
-            if (handler.destSocket != null && handler.destSocket.isOpen()) {
-                handler.destSocket.close();
-            }
-            handler.cleanup();
-        } catch (Exception e) {
-            e.printStackTrace();
         }
     }
 }
