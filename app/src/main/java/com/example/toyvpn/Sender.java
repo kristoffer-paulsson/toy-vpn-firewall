@@ -4,13 +4,9 @@ import com.example.toyvpn.tcpip.Packet;
 import com.example.toyvpn.tcpip.TCBStatus;
 
 import java.io.IOException;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
-
-import kotlin.Triple;
-
 
 public class Sender extends TcpHandler {
 
@@ -19,15 +15,6 @@ public class Sender extends TcpHandler {
     }
 
     public static final int HEADER_SIZE = Packet.IP4_HEADER_SIZE + Packet.TCP_HEADER_SIZE;
-
-    public String packetToTag(Packet packet) {
-        InetAddress destinationAddress = packet.ip4Header.destinationAddress;
-        Packet.TCPHeader tcpHeader = packet.tcpHeader;
-        //Log.d(TAG, String.format("get pack %d tcp " + tcpHeader.printSimple() + " ", currentPacket.packId));
-        int destinationPort = tcpHeader.destinationPort;
-        int sourcePort = tcpHeader.sourcePort;
-        return destinationAddress.getHostAddress() + ":" + destinationPort + ":" + sourcePort;
-    }
 
     public ConnectionHandler start(
             Packet packet,

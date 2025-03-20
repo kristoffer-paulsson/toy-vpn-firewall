@@ -1,15 +1,11 @@
 package com.example.toyvpn;
 
 import android.net.VpnService;
-
 import com.example.toyvpn.tcpip.Packet;
-
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
-import java.nio.channels.ServerSocketChannel;
-import java.nio.channels.SocketChannel;
 import java.nio.channels.spi.SelectorProvider;
 import java.util.Iterator;
 import java.util.Set;
@@ -17,6 +13,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 
 import kotlin.Triple;
+
 
 public class ConnectionManager {
 
@@ -149,12 +146,11 @@ public class ConnectionManager {
 
         @Override
         public void run() {
-            Sender sender = connectionManager.getSender();
             Receiver receiver = connectionManager.getReceiver();
             Selector selector = connectionManager.getSelector();
 
             while (!Thread.interrupted()) {
-                ConnectionHandler handler;
+                ConnectionHandler handler = null;
                 try {
                     int readyChannels = selector.select();
                     Set<SelectionKey> selectedKeys = selector.selectedKeys();
@@ -179,10 +175,10 @@ public class ConnectionManager {
                         keyIterator.remove();
                     }
                 } catch (Exception e) {
-                    throw new RuntimeException(e);
                     if (handler != null) {
                         receiver.closeRst(handler);
                     }
+                    throw new RuntimeException(e);
                 }
             }
         }

@@ -22,7 +22,6 @@ import android.content.SharedPreferences;
 import android.net.VpnService;
 import android.os.Bundle;
 
-
 public class ToyVpnClient extends Activity {
     public interface Prefs {
         String NAME = "connection";
@@ -36,8 +35,8 @@ public class ToyVpnClient extends Activity {
         final SharedPreferences prefs = getSharedPreferences(Prefs.NAME, MODE_PRIVATE);
 
         findViewById(R.id.connect).setOnClickListener(v -> {
-
             Intent intent = VpnService.prepare(ToyVpnClient.this);
+
             if (intent != null) {
                 startActivityForResult(intent, 0);
             } else {
